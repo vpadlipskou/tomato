@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tomato — wheel timer (PySide6).
-Scroll wheel to set time (1-59 min). Click = start/pause. Hold 1s = stop.
+Scroll wheel to set time (1-59 min). Click = start/pause. Hold 0.8s = stop.
 Textured wheel with pointer. Start point at bottom, clockwise.
 """
 
@@ -107,8 +107,7 @@ class WheelTimer(QWidget):
         self.running = False
         self.paused = False
 
-        # Long-press: fires after 1s even without release
-        self._press_timer = QElapsedTimer()
+        # Long-press: fires after 0.8s even without release
         self._long_press_check = QTimer(self)
         self._long_press_check.setSingleShot(True)
         self._long_press_check.setInterval(LONG_PRESS_MS)
@@ -336,6 +335,7 @@ class WheelTimer(QWidget):
 
     def wheelEvent(self, event):
         if self.running or self.paused:
+            event.accept()
             return
         # Accumulate delta — 30 units threshold
         self._scroll_accum += event.angleDelta().y()
@@ -355,7 +355,6 @@ class WheelTimer(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint()
-            self._press_timer.start()
             self._long_press_fired = False
             self._long_press_check.start()
 
@@ -392,7 +391,7 @@ class WheelTimer(QWidget):
             self._start()
 
     def _on_long_press(self):
-        """Fires after 1s hold — no need to release."""
+        """Fires after 0.8s hold — no need to release."""
         self._long_press_fired = True
         self._scroll_snd.play()
         self._full_stop()
