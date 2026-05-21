@@ -15,7 +15,7 @@ from PySide6.QtGui import (
     QPixmap, QIcon, QRadialGradient, QPainterPath,
 )
 from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtMultimedia import QSoundEffect, QMediaPlayer, QAudioOutput
+from PySide6.QtMultimedia import QSoundEffect
 from PySide6.QtCore import QUrl
 
 
@@ -34,8 +34,8 @@ TRACK_COLOR   = QColor("#2e2e2e")
 HINT_COLOR    = PAL_SAGE
 
 STEP_SEC = 5
-MIN_TIME = 15       # 15 sec
-MAX_TIME = 59 * 60  # 59 min
+MIN_TIME = 5        # 5 sec
+MAX_TIME = 55 * 60 + 55  # 55 min 55 sec
 LONG_PRESS_MS = 800
 SCROLL_SFX_INTERVAL_MS = 45
 WORK_TICK_INTERVAL_MS = 1000
@@ -47,7 +47,9 @@ def _asset_path(*parts):
     return os.path.join(_BASE_DIR, *parts)
 
 
-RING_WAV = _asset_path("resources", "audio", "clock_ring.wav")
+RING_WAV = _asset_path("resources", "audio", "clock_ring_trimmed.wav")
+if not os.path.exists(RING_WAV):
+    RING_WAV = _asset_path("resources", "audio", "clock_ring.wav")
 SCROLL_WAV = _asset_path("resources", "audio", "scroll_tick.wav")
 
 
@@ -135,24 +137,23 @@ class WheelTimer(QWidget):
         # Scroll feedback (short one-shot)
         self._scroll_snd = QSoundEffect(self)
         self._scroll_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
-        self._scroll_snd.setVolume(0.075)
+        self._scroll_snd.setVolume(0.2)
         self._last_scroll_sfx = QElapsedTimer()
 
         # Continuous ticking during WORK (metronome-style timer)
         self._work_tick_snd = QSoundEffect(self)
         self._work_tick_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
-        self._work_tick_snd.setVolume(0.09)
+        self._work_tick_snd.setVolume(0.2)
         self._work_tick_timer = QTimer(self)
         self._work_tick_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._work_tick_timer.setInterval(WORK_TICK_INTERVAL_MS)
         self._work_tick_timer.timeout.connect(self._on_work_tick)
 
         # Ring/bell (looped until user clicks)
-        self._ring_output = QAudioOutput(self)
-        self._ring_output.setVolume(0.12)
-        self._ring_player = QMediaPlayer(self)
-        self._ring_player.setAudioOutput(self._ring_output)
-        self._ring_player.setSource(QUrl.fromLocalFile(RING_WAV))
+        self._ring_snd = QSoundEffect(self)
+        self._ring_snd.setSource(QUrl.fromLocalFile(RING_WAV))
+        self._ring_snd.setVolume(0.2)
+        self._ring_snd.setLoopCount(1)
 
         self.setWindowIcon(_make_tomato_icon())
         # Keep a hi-res source and draw it scaled down for cleaner edges.
@@ -424,7 +425,7 @@ class WheelTimer(QWidget):
             return
         self.running = True
         self.paused = False
-        self._ring_player.stop()
+        self._ring_snd.stop()
         self._timer.start()
         if self.is_work:
             self._on_work_tick()
@@ -454,7 +455,7 @@ class WheelTimer(QWidget):
         self.paused = False
         self._work_tick_timer.stop()
         self._work_tick_snd.stop()
-        self._ring_player.stop()
+        self._ring_snd.stop()
         self.is_work = True
         self.total_sec = 25 * 60
         self.remaining_sec = self.total_sec
@@ -475,14 +476,14 @@ class WheelTimer(QWidget):
             self._work_tick_snd.stop()
 
             if self.is_work:
-                self._ring_player.setPosition(0)
-                self._ring_player.play()
+                self._ring_snd.stop()
+                self._ring_snd.play()
                 self.is_work = False
                 self.total_sec = 5 * 60
                 self.remaining_sec = self.total_sec
             else:
-                self._ring_player.setPosition(0)
-                self._ring_player.play()
+                self._ring_snd.stop()
+                self._ring_snd.play()
                 self.is_work = True
                 self.total_sec = 25 * 60
                 self.remaining_sec = self.total_sec
