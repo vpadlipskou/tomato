@@ -40,9 +40,15 @@ LONG_PRESS_MS = 800
 SCROLL_SFX_INTERVAL_MS = 45
 WORK_TICK_INTERVAL_MS = 1000
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-RING_WAV = os.path.join(_HERE, "clock_ring.wav")
-SCROLL_WAV = os.path.join(_HERE, "scroll_tick.wav")
+_BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
+
+def _asset_path(*parts):
+    return os.path.join(_BASE_DIR, *parts)
+
+
+RING_WAV = _asset_path("resources", "audio", "clock_ring.wav")
+SCROLL_WAV = _asset_path("resources", "audio", "scroll_tick.wav")
 
 
 # --- Icon ---
