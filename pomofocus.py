@@ -155,6 +155,8 @@ class WheelTimer(QWidget):
         self._ring_player.setSource(QUrl.fromLocalFile(RING_WAV))
 
         self.setWindowIcon(_make_tomato_icon())
+        # Keep a hi-res source and draw it scaled down for cleaner edges.
+        self._logo_pix = _make_tomato_icon(128).pixmap(128, 128)
 
     def _play_scroll_feedback(self):
         """Play immediate scroll feedback with a soft max rate."""
@@ -201,6 +203,19 @@ class WheelTimer(QWidget):
 
         self._draw_pointer(p, cx, cy, radius, color)
         self._draw_progress(p, cx, cy, radius - 32, color)
+
+        # Small logo above the timer text
+        logo_size = 40
+        logo_x = cx - logo_size // 2
+        logo_y = cy - 72
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.setOpacity(0.90)
+        p.drawPixmap(
+            QRectF(logo_x, logo_y, logo_size, logo_size),
+            self._logo_pix,
+            QRectF(self._logo_pix.rect()),
+        )
+        p.setOpacity(1.0)
 
         # Time text
         mins = self.remaining_sec // 60
