@@ -34,7 +34,7 @@ TRACK_COLOR   = QColor("#2e2e2e")
 HINT_COLOR    = PAL_SAGE
 
 STEP_SEC = 5
-MIN_TIME = 2        # 2 sec (debug)
+MIN_TIME = 30       # 30 sec
 MAX_TIME = 59 * 60  # 59 min
 LONG_PRESS_MS = 1000
 
@@ -89,8 +89,16 @@ class WheelTimer(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("tomato")
-        self.setFixedSize(400, 400)
+        self.setFixedSize(320, 320)
         self.setMouseTracking(True)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._drag_pos = None
+        self._dragging = False
 
         self.is_work = True
         self.total_sec = 25 * 60
@@ -138,8 +146,6 @@ class WheelTimer(QWidget):
         self._ring_player = QMediaPlayer(self)
         self._ring_player.setAudioOutput(self._ring_output)
         self._ring_player.setSource(QUrl.fromLocalFile(RING_WAV))
-        self._ring_player.playbackStateChanged.connect(self._on_ring_state)
-        self._ring_should_loop = False
 
         self.setWindowIcon(_make_tomato_icon())
 
@@ -148,10 +154,12 @@ class WheelTimer(QWidget):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), BG)
-
+        # Transparent background — draw dark circle behind wheel
         cx, cy = self.width() // 2, self.height() // 2
         radius = 140
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(BG)
+        p.drawEllipse(QPointF(cx, cy), radius + 2, radius + 2)
         color = WORK_COLOR if self.is_work else REST_COLOR
 
         # Draw cached wheel
@@ -189,21 +197,21 @@ class WheelTimer(QWidget):
         p.setPen(HINT_COLOR)
         sfm = QFontMetrics(small_font)
         lw = sfm.horizontalAdvance(label)
-        p.drawText(cx - lw // 2, cy + th // 4 + 30, label)
+        p.drawText(cx - lw // 2, cy + th // 4 + 28, label)
 
         # Hint
         if not self.running and not self.paused:
-            hint = "scroll = time  |  click = start"
+            hint = "scroll · click · hold"
         elif self.paused:
-            hint = "click = resume  |  hold = reset"
+            hint = "click · hold"
         else:
-            hint = "click = pause  |  hold = stop"
+            hint = "click · hold"
         hint_font = QFont("Helvetica Neue", 9)
         p.setFont(hint_font)
         p.setPen(QColor("#555555"))
         hfm = QFontMetrics(hint_font)
         hw = hfm.horizontalAdvance(hint)
-        p.drawText(cx - hw // 2, self.height() - 14, hint)
+        p.drawText(cx - hw // 2, cy + th // 4 + 46, hint)
 
         p.end()
 
@@ -323,13 +331,28 @@ class WheelTimer(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint()
             self._press_timer.start()
             self._long_press_fired = False
             self._long_press_check.start()
 
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() & Qt.MouseButton.LeftButton:
+            diff = event.globalPosition().toPoint() - self._drag_pos
+            if diff.manhattanLength() > 5:
+                if not self._dragging:
+                    self._dragging = True
+                    # Cancel click/hold if dragged
+                    self._long_press_check.stop()
+                    self._long_press_fired = True
+                    # Use native system drag for proper multi-monitor support
+                    self.windowHandle().startSystemMove()
+
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        self._drag_pos = None
+        self._dragging = False
         self._long_press_check.stop()
 
         if self._long_press_fired:
@@ -358,7 +381,6 @@ class WheelTimer(QWidget):
             return
         self.running = True
         self.paused = False
-        self._ring_should_loop = False
         self._ring_player.stop()
         self._timer.start()
         if self.is_work:
@@ -390,7 +412,6 @@ class WheelTimer(QWidget):
         self.paused = False
         self._tick_should_loop = False
         self._tick_player.stop()
-        self._ring_should_loop = False
         self._ring_player.stop()
         self.is_work = True
         self.total_sec = 25 * 60
@@ -405,11 +426,7 @@ class WheelTimer(QWidget):
             self._tick_player.setPosition(0)
             self._tick_player.play()
 
-    def _on_ring_state(self, state):
-        """Restart ring audio when it finishes (manual loop)."""
-        if state == QMediaPlayer.PlaybackState.StoppedState and self._ring_should_loop:
-            self._ring_player.setPosition(0)
-            self._ring_player.play()
+
 
     def _tick(self):
         if self.remaining_sec > 0:
@@ -424,7 +441,6 @@ class WheelTimer(QWidget):
             self._tick_player.stop()
 
             if self.is_work:
-                self._ring_should_loop = True
                 self._ring_player.setPosition(0)
                 self._ring_player.play()
                 self.is_work = False
