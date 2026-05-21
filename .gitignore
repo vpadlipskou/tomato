@@ -1,1 +1,8 @@
 __pycache__/
+.DS_Store
+build/
+dist/
+Tomato.spec
+*.zip
+*.iconset/
+*_1024.png

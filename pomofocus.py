@@ -33,15 +33,14 @@ TEXT_COLOR    = QColor("#f0ece4")
 TRACK_COLOR   = QColor("#2e2e2e")
 HINT_COLOR    = PAL_SAGE
 
-STEP_SEC = 15
+STEP_SEC = 5
 MIN_TIME = 15       # 15 sec
 MAX_TIME = 59 * 60  # 59 min
-LONG_PRESS_MS = 1000
+LONG_PRESS_MS = 800
 SCROLL_SFX_INTERVAL_MS = 45
 WORK_TICK_INTERVAL_MS = 1000
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-TICK_WAV = os.path.join(_HERE, "clock_ticking.wav")
 RING_WAV = os.path.join(_HERE, "clock_ring.wav")
 SCROLL_WAV = os.path.join(_HERE, "scroll_tick.wav")
 
@@ -336,7 +335,7 @@ class WheelTimer(QWidget):
     # --- Input ---
 
     def wheelEvent(self, event):
-        if self.running:
+        if self.running or self.paused:
             return
         # Accumulate delta — 30 units threshold
         self._scroll_accum += event.angleDelta().y()
@@ -345,10 +344,11 @@ class WheelTimer(QWidget):
         if steps != 0:
             self._scroll_accum -= steps * threshold
             old_val = self.total_sec
-            self.total_sec = max(MIN_TIME, min(MAX_TIME, self.total_sec + steps * STEP_SEC))
-            if self.total_sec != old_val:
-                self.remaining_sec = self.total_sec
+            new_total = max(MIN_TIME, min(MAX_TIME, self.total_sec + steps * STEP_SEC))
+            if new_total != old_val:
                 self._play_scroll_feedback()
+                self.total_sec = new_total
+                self.remaining_sec = self.total_sec
                 self.update()
         event.accept()
 
