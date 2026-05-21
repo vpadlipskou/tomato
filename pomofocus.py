@@ -15,7 +15,7 @@ from PySide6.QtGui import (
     QPixmap, QIcon, QRadialGradient, QPainterPath,
 )
 from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtMultimedia import QSoundEffect
+from PySide6.QtMultimedia import QSoundEffect, QMediaDevices
 from PySide6.QtCore import QUrl
 
 
@@ -47,9 +47,7 @@ def _asset_path(*parts):
     return os.path.join(_BASE_DIR, *parts)
 
 
-RING_WAV = _asset_path("resources", "audio", "clock_ring_trimmed.wav")
-if not os.path.exists(RING_WAV):
-    RING_WAV = _asset_path("resources", "audio", "clock_ring.wav")
+RING_WAV = _asset_path("resources", "audio", "clock_ring.wav")
 SCROLL_WAV = _asset_path("resources", "audio", "scroll_tick.wav")
 
 
@@ -134,26 +132,23 @@ class WheelTimer(QWidget):
         self._wheel_cache = None
 
         # --- Audio ---
-        # Scroll feedback (short one-shot)
-        self._scroll_snd = QSoundEffect(self)
-        self._scroll_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
-        self._scroll_snd.setVolume(0.2)
+        self._scroll_snd = None
+        self._work_tick_snd = None
+        self._ring_snd = None
         self._last_scroll_sfx = QElapsedTimer()
-
-        # Continuous ticking during WORK (metronome-style timer)
-        self._work_tick_snd = QSoundEffect(self)
-        self._work_tick_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
-        self._work_tick_snd.setVolume(0.2)
         self._work_tick_timer = QTimer(self)
         self._work_tick_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._work_tick_timer.setInterval(WORK_TICK_INTERVAL_MS)
         self._work_tick_timer.timeout.connect(self._on_work_tick)
+        self._setup_audio_effects()
 
-        # Ring/bell (looped until user clicks)
-        self._ring_snd = QSoundEffect(self)
-        self._ring_snd.setSource(QUrl.fromLocalFile(RING_WAV))
-        self._ring_snd.setVolume(0.2)
-        self._ring_snd.setLoopCount(1)
+        # Rebuild sound effects after output-device hot-switch (e.g. plug headphones).
+        self._audio_reinit_timer = QTimer(self)
+        self._audio_reinit_timer.setSingleShot(True)
+        self._audio_reinit_timer.setInterval(250)
+        self._audio_reinit_timer.timeout.connect(self._reinit_audio_for_device_change)
+        self._media_devices = QMediaDevices(self)
+        self._media_devices.audioOutputsChanged.connect(self._on_audio_outputs_changed)
 
         self.setWindowIcon(_make_tomato_icon())
         # Keep a hi-res source and draw it scaled down for cleaner edges.
@@ -170,6 +165,38 @@ class WheelTimer(QWidget):
             self._last_scroll_sfx.restart()
         else:
             self._last_scroll_sfx.start()
+
+    def _setup_audio_effects(self):
+        for snd_name in ("_scroll_snd", "_work_tick_snd", "_ring_snd"):
+            snd = getattr(self, snd_name, None)
+            if snd is not None:
+                snd.stop()
+                snd.deleteLater()
+
+        self._scroll_snd = QSoundEffect(self)
+        self._scroll_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
+        self._scroll_snd.setVolume(0.2)
+
+        self._work_tick_snd = QSoundEffect(self)
+        self._work_tick_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
+        self._work_tick_snd.setVolume(0.2)
+
+        self._ring_snd = QSoundEffect(self)
+        self._ring_snd.setSource(QUrl.fromLocalFile(RING_WAV))
+        self._ring_snd.setVolume(0.2)
+        self._ring_snd.setLoopCount(1)
+
+    def _on_audio_outputs_changed(self):
+        self._audio_reinit_timer.start()
+
+    def _reinit_audio_for_device_change(self):
+        was_ring_playing = self._ring_snd is not None and self._ring_snd.isPlaying()
+        was_work_tick_active = self.running and self.is_work and self._work_tick_timer.isActive()
+        self._setup_audio_effects()
+        if was_ring_playing:
+            self._ring_snd.play()
+        elif was_work_tick_active:
+            self._on_work_tick()
 
     def _on_work_tick(self):
         if not self.running or not self.is_work:
@@ -242,19 +269,33 @@ class WheelTimer(QWidget):
         lw = sfm.horizontalAdvance(label)
         p.drawText(cx - lw // 2, cy + th // 4 + 28, label)
 
-        # Hint
-        if not self.running and not self.paused:
-            hint = "scroll · click · hold"
-        elif self.paused:
-            hint = "click · hold"
-        else:
-            hint = "click · hold"
+        # Hint (explicit wording for first-time users)
         hint_font = QFont("Helvetica Neue", 9)
         p.setFont(hint_font)
         p.setPen(QColor("#555555"))
-        hfm = QFontMetrics(hint_font)
-        hw = hfm.horizontalAdvance(hint)
-        p.drawText(cx - hw // 2, cy + th // 4 + 46, hint)
+
+        if not self.running and not self.paused:
+            hint_lines = [
+                "Scroll: set time",
+                "Click: start",
+                "Hold 0.8s: reset",
+            ]
+        elif self.paused:
+            hint_lines = [
+                "Click: continue",
+                "Hold 0.8s: reset",
+            ]
+        else:
+            hint_lines = [
+                "Click: pause",
+                "Hold 0.8s: reset",
+            ]
+
+        line_y = cy + th // 4 + 44
+        line_step = 14
+        for i, line in enumerate(hint_lines):
+            hw = QFontMetrics(hint_font).horizontalAdvance(line)
+            p.drawText(cx - hw // 2, line_y + i * line_step, line)
 
         p.end()
 
