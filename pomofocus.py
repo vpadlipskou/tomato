@@ -33,10 +33,12 @@ TEXT_COLOR    = QColor("#f0ece4")
 TRACK_COLOR   = QColor("#2e2e2e")
 HINT_COLOR    = PAL_SAGE
 
-STEP_SEC = 5
-MIN_TIME = 30       # 30 sec
+STEP_SEC = 15
+MIN_TIME = 15       # 15 sec
 MAX_TIME = 59 * 60  # 59 min
 LONG_PRESS_MS = 1000
+SCROLL_SFX_INTERVAL_MS = 45
+WORK_TICK_INTERVAL_MS = 1000
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 TICK_WAV = os.path.join(_HERE, "clock_ticking.wav")
@@ -129,25 +131,46 @@ class WheelTimer(QWidget):
         # Scroll feedback (short one-shot)
         self._scroll_snd = QSoundEffect(self)
         self._scroll_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
-        self._scroll_snd.setVolume(0.25)
+        self._scroll_snd.setVolume(0.075)
+        self._last_scroll_sfx = QElapsedTimer()
 
-        # Continuous ticking (manual loop via signal)
-        self._tick_output = QAudioOutput(self)
-        self._tick_output.setVolume(0.35)
-        self._tick_player = QMediaPlayer(self)
-        self._tick_player.setAudioOutput(self._tick_output)
-        self._tick_player.setSource(QUrl.fromLocalFile(TICK_WAV))
-        self._tick_player.playbackStateChanged.connect(self._on_tick_state)
-        self._tick_should_loop = False
+        # Continuous ticking during WORK (metronome-style timer)
+        self._work_tick_snd = QSoundEffect(self)
+        self._work_tick_snd.setSource(QUrl.fromLocalFile(SCROLL_WAV))
+        self._work_tick_snd.setVolume(0.09)
+        self._work_tick_timer = QTimer(self)
+        self._work_tick_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._work_tick_timer.setInterval(WORK_TICK_INTERVAL_MS)
+        self._work_tick_timer.timeout.connect(self._on_work_tick)
 
         # Ring/bell (looped until user clicks)
         self._ring_output = QAudioOutput(self)
-        self._ring_output.setVolume(0.4)
+        self._ring_output.setVolume(0.12)
         self._ring_player = QMediaPlayer(self)
         self._ring_player.setAudioOutput(self._ring_output)
         self._ring_player.setSource(QUrl.fromLocalFile(RING_WAV))
 
         self.setWindowIcon(_make_tomato_icon())
+
+    def _play_scroll_feedback(self):
+        """Play immediate scroll feedback with a soft max rate."""
+        if self._last_scroll_sfx.isValid() and self._last_scroll_sfx.elapsed() < SCROLL_SFX_INTERVAL_MS:
+            return
+        if self._scroll_snd.isPlaying():
+            self._scroll_snd.stop()
+        self._scroll_snd.play()
+        if self._last_scroll_sfx.isValid():
+            self._last_scroll_sfx.restart()
+        else:
+            self._last_scroll_sfx.start()
+
+    def _on_work_tick(self):
+        if not self.running or not self.is_work:
+            self._work_tick_timer.stop()
+            return
+        if self._work_tick_snd.isPlaying():
+            self._work_tick_snd.stop()
+        self._work_tick_snd.play()
 
     # --- Paint ---
 
@@ -325,7 +348,7 @@ class WheelTimer(QWidget):
             self.total_sec = max(MIN_TIME, min(MAX_TIME, self.total_sec + steps * STEP_SEC))
             if self.total_sec != old_val:
                 self.remaining_sec = self.total_sec
-                self._scroll_snd.play()
+                self._play_scroll_feedback()
                 self.update()
         event.accept()
 
@@ -384,17 +407,16 @@ class WheelTimer(QWidget):
         self._ring_player.stop()
         self._timer.start()
         if self.is_work:
-            self._tick_should_loop = True
-            self._tick_player.setPosition(0)
-            self._tick_player.play()
+            self._on_work_tick()
+            self._work_tick_timer.start()
         self.update()
 
     def _pause(self):
         self.running = False
         self.paused = True
         self._timer.stop()
-        self._tick_should_loop = False
-        self._tick_player.pause()
+        self._work_tick_timer.stop()
+        self._work_tick_snd.stop()
         self.update()
 
     def _resume(self):
@@ -402,16 +424,16 @@ class WheelTimer(QWidget):
         self.paused = False
         self._timer.start()
         if self.is_work:
-            self._tick_should_loop = True
-            self._tick_player.play()
+            self._on_work_tick()
+            self._work_tick_timer.start()
         self.update()
 
     def _full_stop(self):
         self._timer.stop()
         self.running = False
         self.paused = False
-        self._tick_should_loop = False
-        self._tick_player.stop()
+        self._work_tick_timer.stop()
+        self._work_tick_snd.stop()
         self._ring_player.stop()
         self.is_work = True
         self.total_sec = 25 * 60
@@ -419,14 +441,6 @@ class WheelTimer(QWidget):
         self.update()
 
     # --- Timer ---
-
-    def _on_tick_state(self, state):
-        """Restart tick audio when it finishes (manual loop)."""
-        if state == QMediaPlayer.PlaybackState.StoppedState and self._tick_should_loop:
-            self._tick_player.setPosition(0)
-            self._tick_player.play()
-
-
 
     def _tick(self):
         if self.remaining_sec > 0:
@@ -437,8 +451,8 @@ class WheelTimer(QWidget):
             self._timer.stop()
             self.running = False
             self.paused = False
-            self._tick_should_loop = False
-            self._tick_player.stop()
+            self._work_tick_timer.stop()
+            self._work_tick_snd.stop()
 
             if self.is_work:
                 self._ring_player.setPosition(0)
@@ -447,6 +461,8 @@ class WheelTimer(QWidget):
                 self.total_sec = 5 * 60
                 self.remaining_sec = self.total_sec
             else:
+                self._ring_player.setPosition(0)
+                self._ring_player.play()
                 self.is_work = True
                 self.total_sec = 25 * 60
                 self.remaining_sec = self.total_sec
